@@ -32,6 +32,9 @@ var config = {
 	defaultDelay: 3 * 1000,
 	continuedDelay: 30 * 1000,
 	notContinuedDelay: 250,
+	// Per-IP rate limit for API key verification requests
+	rateLimitRequests: 10,
+	rateLimitWindow: 60, // seconds
 	statsD: {
 		host: ''
 	}

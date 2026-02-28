@@ -38,6 +38,7 @@ var WSError = utils.WSError;
 var log = require('./log');
 var connections = require('./connections');
 var zoteroAPI = require('./zotero_api');
+var rateLimiter = require('./rate_limiter');
 var redisClient = require('./redis');
 
 module.exports = async function (onInit) {
@@ -86,6 +87,9 @@ module.exports = async function (onInit) {
 			}
 			
 			if (apiKey) {
+				if (!rateLimiter.checkLimit(ws.remoteAddress)) {
+					throw new WSError(429, "Too Many Requests");
+				}
 				let {topics, apiKeyID} = await zoteroAPI.getKeyInfo(apiKey, ws);
 				// Append global topics to key's allowed topic list
 				topics = topics.concat(config.get('globalTopics'));
@@ -237,6 +241,9 @@ module.exports = async function (onInit) {
 			}
 			
 			if (apiKey) {
+				if (!rateLimiter.checkLimit(connection.remoteAddress)) {
+					throw new WSError(429, "Too Many Requests");
+				}
 				var {topics: availableTopics, apiKeyID} = await zoteroAPI.getKeyInfo(apiKey, connection);
 			}
 			else if (!topics) {

@@ -4,5 +4,6 @@
 	"redis": {
 		"prefix": ""
 	},
-	"defaultDelay": 0
+	"defaultDelay": 0,
+	"rateLimitRequests": 3
 }

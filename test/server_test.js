@@ -35,6 +35,7 @@ mockery.enable();
 mockery.warnOnUnregistered(false);
 
 var zoteroAPI = require('../zotero_api');
+var rateLimiter = require('../rate_limiter');
 var connections = require('../connections');
 var redis = require('./support/redis_mock');
 var WebSocket = require('./support/websocket');
@@ -69,6 +70,7 @@ describe("Streamer Tests:", function () {
 	
 	beforeEach(function () {
 		redis.reset();
+		rateLimiter.reset();
 		console.log((new Array(63)).join("="));
 	});
 	afterEach(function () {
@@ -1149,6 +1151,104 @@ describe("Streamer Tests:", function () {
 						apiKey: 'testapikey12345678901234'
 					});
 				}));
+			});
+		});
+
+		it('should reject a single-key connection when rate limit is exceeded', function (done) {
+			// rateLimitRequests is 3 in test config
+			var apiKey1 = "INVALID" + makeAPIKey().apiKey.substr(7);
+			var apiKey2 = "INVALID" + makeAPIKey().apiKey.substr(7);
+			var apiKey3 = "INVALID" + makeAPIKey().apiKey.substr(7);
+			var apiKey4 = "INVALID" + makeAPIKey().apiKey.substr(7);
+
+			var closed = 0;
+			function onClose() {
+				closed++;
+				if (closed == 3) {
+					// Fourth connection should be rate limited
+					var ws4 = new WebSocket({ apiKey: apiKey4 });
+					ws4.on('close', function (code, reason) {
+						assert.equal(code, 4429);
+						assert.equal(reason, "Too Many Requests");
+						done();
+					});
+				}
+			}
+
+			// First three connections use up the limit (they'll fail with 4403
+			// for invalid key, but they still count against the rate limit)
+			var ws1 = new WebSocket({ apiKey: apiKey1 });
+			ws1.on('close', onClose);
+
+			var ws2 = new WebSocket({ apiKey: apiKey2 });
+			ws2.on('close', onClose);
+
+			var ws3 = new WebSocket({ apiKey: apiKey3 });
+			ws3.on('close', onClose);
+		});
+
+		it('should reject createSubscriptions when rate limit is exceeded', function (done) {
+			// rateLimitRequests is 3 in test config
+			var ws = new WebSocket;
+			ws.on('message', function (data) {
+				onEvent(data, 'connected', Promise.coroutine(function* (fields) {
+					var keys = [];
+					for (let i = 0; i < 4; i++) {
+						keys.push(makeAPIKey());
+					}
+					var topics = ['/users/123456'];
+
+					var stub = sinon.stub(zoteroAPI, 'getKeyInfo');
+					for (let i = 0; i < keys.length; i++) {
+						stub.withArgs(keys[i].apiKey)
+							.returns(Promise.resolve({topics: topics, apiKeyID: keys[i].apiKeyID}));
+					}
+
+					// First three createSubscriptions should succeed
+					for (let i = 0; i < 3; i++) {
+						yield ws.send({
+							action: 'createSubscriptions',
+							subscriptions: [{
+								apiKey: keys[i].apiKey
+							}]
+						}, 'subscriptionsCreated');
+					}
+
+					zoteroAPI.getKeyInfo.restore();
+
+					// Fourth should be rate limited
+					ws.on('close', function (code, reason) {
+						assert.equal(code, 4429);
+						assert.equal(reason, "Too Many Requests");
+						done();
+					});
+
+					ws.send({
+						action: 'createSubscriptions',
+						subscriptions: [{
+							apiKey: keys[3].apiKey
+						}]
+					});
+				}));
+			});
+		});
+
+		it('should allow connections under the rate limit', function (done) {
+			var {apiKey, apiKeyID} = makeAPIKey();
+			var topics = ['/users/123456'];
+
+			sinon.stub(zoteroAPI, 'getKeyInfo')
+				.withArgs(apiKey)
+				.returns(Promise.resolve({topics: topics, apiKeyID: apiKeyID}));
+
+			var ws = new WebSocket({ apiKey: apiKey });
+			ws.on('message', function (data) {
+				onEvent(data, 'connected', function (fields) {
+					ws.end();
+					zoteroAPI.getKeyInfo.restore();
+					assert.typeOf(fields.topics, 'array');
+					done();
+				});
 			});
 		});
 
