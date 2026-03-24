@@ -118,7 +118,8 @@ module.exports = function () {
 					topic: topic,
 					userID: data.userID,
 					username: data.username,
-					apiKey: data.apiKey
+					apiKey: data.apiKey,
+					emails: data.emails
 				});
 				break;
 			}
